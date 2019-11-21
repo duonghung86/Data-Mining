@@ -1,0 +1,181 @@
+---
+title: "Homework 4"
+author: "Thanh Hung Duong"
+date: "November 11, 2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(dplyr)
+library(caret)
+library(e1071)
+
+
+```
+
+# HW4 Part1 : SVM classification for Simulated Data
+
+## Question 1 : Generate a Data Set by Simulations
+
+We seek to generate 5000 cases x1 ... x5000 in R4
+each case x = [ x1 x2 x3 x4 ] has 4 numerical features
+
+### Step 1
+
+Using random sampling of uniform distribution over the interval [-2, +2] to create:
+
+- Aij 4x4 matrix
+
+- Bi 1x4 matrix
+
+- C
+
+And define the polynomial of degree 2 in the 4 variables x1 x2 x3 x4 as follows
+
+$$Pol(x) = \sum_i \sum_j A_{ij} x_i x_j + \sum_i B_i x_i + c/20$$
+
+```{r 1.1.1,echo=FALSE}
+#Set the coefficients for the polynomial
+set.seed(57)
+Aij=runif(16,-2,2)
+Aij=matrix(Aij,4,4)
+Bi=matrix(runif(4,-2,2))
+#Bi=t(Bi)
+C=runif(1,-2,2)
+print('Aij 4x4 matrix:')
+print(Aij,digits=3)
+print('Bi 4x1 matrix:')
+print(Bi,digits=3)
+print(paste('C = ',format(C,digits = 4)))
+
+
+#Function to calculate the polynominal
+polyx <- function(x) {
+  max=matrix(x,1,4)
+  pol=max%*%Aij%*%t(max)+x%*%Bi+C/20
+  pol=pol[1,1]
+  return(pol)
+}
+#test the polynomial
+set.seed(56)
+x0=runif(4,-2,2)
+print('Test the polynomial function')
+print('If x = ') 
+print(x0,digits = 3)
+print(paste(',then Pol(x)=', format(polyx(x0),digits = 4)))
+```
+
+If x= `r x0=runif(4,-2,2)` ,then Pol(x)= `r polyx(x0)`
+
+### Step 2
+
+Using random sampling of uniform distribution over the interval [-2, 2]
+select 10000 vectors x1 ... x10000 in R4
+each such vector xn has 4 randomly chosen coordinates with values in [-2, 2]]
+for each selected xn compute U(n) = Pol(xn) and y(n) = sign[U(n)]
+
+define two classes by
+CL(1) = class1= set of all xn such that y(n) = +1
+CL(-1) = class1= set of all xn such that y(n) = -1
+keep only 2500 cases in CL(1) and 2500 cases in CL(-1),
+Center and Rescale this data set of size 5000 so that the standardized data set will have mean = 0 and
+dispersion =1
+Then Split each class into a training set and a test set , using the proportions 80% and 20%
+this defines a training set TRAIN and a test set TEST of resp. sizes 4000 and 1000
+
+```{r 1.1.2,echo=FALSE}
+#generate 40000 random numbers
+N=10000
+Dataset=matrix(runif(4*N,-2,2),N,4)
+#Compute Yn
+Yn=NULL
+for (i in 1:N){
+  Yn[i]=sign(polyx(Dataset[i,]))
+}
+Dataset=data.frame(Dataset)
+Dataset=cbind(Dataset,Yn)
+
+#Classify and reduce size
+CL1=Dataset[Yn==1,]
+CL0=Dataset[Yn==-1,]
+CL1=CL1[sample(nrow(CL1), 2500), ]
+CL0=CL0[sample(nrow(CL0), 2500), ]
+
+#Standardize the data
+Dataset=bind_rows(CL1,CL0)
+Dataset.dat=Dataset[,1:4]
+Dataset.dat=scale(Dataset.dat)
+Dataset=cbind(Dataset.dat,Dataset[,5])
+rm(Dataset.dat) #remove unuse variable
+colnames(Dataset)[colnames(Dataset)==""] <- "Yn" #rename the true class column
+Dataset=data.frame(Dataset)
+
+#Split into train and test set 80/20
+intrain=createDataPartition(Dataset$Yn,p=0.8,list = FALSE,times = 1)
+TRAIN=Dataset[intrain,]
+TRAIN=TRAIN[sample(nrow(TRAIN)),]
+TEST=Dataset[-intrain,]
+TEST=TEST[sample(nrow(TEST)),]
+kable(head(TRAIN),caption = 'Head of TRAIN set',digits = 3)
+kable(head(TEST),caption = 'Head of TEST set',digits = 3)
+```
+
+## Question 2: SVM classification by linear kernel
+
+- Fix arbitrarily the "cost" parameter in the svm() function, for instance cost = 5
+- Select the kernel parameter kernel = "linear "
+- Run the svm() function on the set TRAIN
+- Compute the number S of support vectors and the ratio s = S/4000
+- Compute the percentages of correct prediction PredTrain and PredTest on the sets TRAIN and TEST
+- Compute two confusion matrices (one for the set TRAIN and one for the test set. Confusion matrices must be converted in terms of frequencies of correct predictions within each class
+- Compute the errors of estimation on PredTRAIN, PredTEST, and on the terms of the confusion matrices
+interpret your results
+
+```{r f1}
+################ A function to calculate the error of estimation
+std_p = function(acc,n) {sqrt(acc*(1-acc)/n)*100}
+```
+```{r 1.2,results='asis'}
+############## A function to generate a nice confusion matrix
+generate_cfm=function(predi,truec,cap){
+  cfm=table(truec, predi)
+  #colnames(cfm)=c('Pred_CL-1','Pred_CL1')
+  #rownames(cfm)=c('True_CL-1','True_CL1')
+  #print(cfm,caption = cap)
+  nocc=rowSums(cfm)
+  pocp=cfm/nocc
+  kable(pocp,caption = paste('Confustion matrix for the set ',cap),digits = 3)
+  acc=(cfm[1,1]+cfm[2,2])/length(truec)
+  std=std_p(acc,length(truec))
+  std_1=std_p(pocp[1,1],nocc[1])
+  std_2=std_p(pocp[2,2],nocc[2])
+  ac=c(acc,pocp[1,1],pocp[2,2])
+  st=c(std,std_1,std_2)
+  pred_table=data.frame(ac,st)
+  rownames(pred_table) = c('Global accuracy','CL-1','CL1')
+  colnames(pred_table) = c('Accuracy','Standard deviation')
+  kable(pred_table,caption=paste('Prediction table for the set ',cap),digits = 3 )
+}
+
+
+
+N=5000
+#x=TRAIN[,1:4]
+#y=TRAIN$Yn
+model =  svm(Yn~., cost=5, kernel='linear',type='C-classification',scale=FALSE,data=TRAIN)
+#Alternative way to use svm without specify the type is to conver Y to factor
+#dat = data.frame(x=x, y=as.factor(y)) # must convert to factor to avoid the svm regression
+#model =  svm(y~., cost=5, kernel='linear',scale=FALSE,data=dat)
+summary(model)
+S=sum(model$nSV)
+s=S/N
+print(paste('Number S of support vectors is ',S))
+print(paste('And the ratio s = ',s))
+PredTRAIN =predict(model,TRAIN[,1:4])
+PredTEST =predict(model,TEST[,1:4])
+# Check accuracy:
+generate_cfm(PredTRAIN, TRAIN$Yn,'Confusion matrix for the set TRAIN')
+generate_cfm(PredTEST, TEST$Yn,'Confusion matrix for the set TEST')
+```
